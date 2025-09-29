@@ -1,0 +1,261 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <title>HW2 Q3 — Line Charts</title>
+  <script type="text/javascript" src="../lib/d3.v5.min.js"></script>
+  <style>
+    body { font-family: system-ui, -apple-system, "Segoe UI", Roboto, Arial, sans-serif; margin: 16px; }
+    svg { display: block; margin-bottom: 28px; }
+    .axis path, .axis line { shape-rendering: crispEdges; stroke: #999; fill: none; }
+    .axis text { font-size: 11px; fill: #333; }
+    .chart-title { font-size: 16px; font-weight: 700; }
+    .line { fill: none; stroke-width: 2px; }
+    .label { font-size: 11px; font-weight: 700; }
+    #legend-b, #legend-c-1, #legend-c-2 { font-size: 12px; }
+    .legend-item { alignment-baseline: middle; }
+    #legend-b circle, #legend-c-1 circle, #legend-c-2 circle { stroke: #333; stroke-width: 1px; }
+    #symbols-b text, #symbols-c-1 text, #symbols-c-2 text { font-size: 10px; fill: #111; }
+    #signature { text-align: right; font-size: 12px; color: #666; margin-top: 4px; }
+  </style>
+</head>
+<body>
+
+<!-- Q3.1 -->
+<svg id="svg-a"></svg>
+<!-- Q3.2 -->
+<svg id="svg-b"></svg>
+<!-- Q3.3-1 (sqrt) -->
+<svg id="svg-c-1"></svg>
+<!-- Q3.3-2 (log) -->
+<svg id="svg-c-2"></svg>
+
+<div id="signature">tmccoy43</div>
+
+<script>
+
+const GAMES8 = ['Catan','Dominion','Codenames','Terraforming Mars','Gloomhaven','Magic: The Gathering','Dixit','Monopoly'];
+const GAMES4 = ['Catan','Codenames','Terraforming Mars','Gloomhaven'];
+
+const parseDate = d3.timeParse("%Y-%m-%d");
+const fmtTick = d3.timeFormat("%b %y");
+const threeMonths = d3.timeMonth.every(3);
+
+const margin = {top: 28, right: 140, bottom: 46, left: 56};
+const outerW = 960, outerH = 360;
+const w = outerW - margin.left - margin.right;
+const h = outerH - margin.top - margin.bottom;
+
+const colors10 = d3.schemeCategory10;
+
+const START = new Date(2016,10,1);
+const END   = new Date(2020,7,1);
+
+function buildSeriesWide(raw, games, countSuffix="=count", rankSuffix="=rank") {
+  return games.map(game => {
+    const countCol = `${game}${countSuffix}`;
+    const rankCol  = `${game}${rankSuffix}`;
+    const values = raw
+      .filter(d => d.date >= START && d.date <= END)
+      .sort((a,b) => d3.ascending(a.date, b.date))
+      .map(d => ({
+        date: d.date,
+        value: +d[countCol],
+        rank: (d[rankCol] !== "" && d[rankCol] != null) ? +d[rankCol] : null
+      }));
+    return { game, values };
+  });
+}
+
+function makeAxes(svg, idPrefix, x, y, xLabel, yLabel, title) {
+  svg.attr("width", outerW).attr("height", outerH);
+
+  svg.append("text")
+    .attr("id", `title-${idPrefix}`)
+    .attr("class", "chart-title")
+    .attr("x", margin.left)
+    .attr("y", margin.top - 8)
+    .text(title);
+
+  const plotG = svg.append("g").attr("id", `plot-${idPrefix}`)
+                   .attr("transform", `translate(${margin.left},${margin.top})`);
+  const linesG = plotG.append("g").attr("id", `lines-${idPrefix}`);
+  const xAxisG = plotG.append("g").attr("id", `x-axis-${idPrefix}`).attr("class", "axis")
+                      .attr("transform", `translate(0,${h})`);
+  const yAxisG = plotG.append("g").attr("id", `y-axis-${idPrefix}`).attr("class", "axis");
+
+  const xAxis = d3.axisBottom(x).ticks(threeMonths).tickFormat(fmtTick);
+  const yAxis = d3.axisLeft(y).ticks(6);
+
+  xAxisG.call(xAxis);
+  yAxisG.call(yAxis);
+
+  xAxisG.append("text")
+    .attr("x", w/2)
+    .attr("y", 36)
+    .attr("fill", "#000")
+    .attr("text-anchor", "middle")
+    .text(xLabel);
+
+  yAxisG.append("text")
+    .attr("transform", "rotate(-90)")
+    .attr("x", -h/2)
+    .attr("y", -42)
+    .attr("fill", "#000")
+    .attr("text-anchor", "middle")
+    .text(yLabel);
+
+  return { plotG, linesG, xAxisG, yAxisG };
+}
+
+function drawLines(linesG, series, x, y, colorMap) {
+  const lineGen = d3.line()
+    .x(d => x(d.date))
+    .y(d => y(d.value));
+
+  linesG.selectAll(".line")
+    .data(series)
+    .enter().append("path")
+      .attr("class", "line")
+      .attr("stroke", d => colorMap(d.game))
+      .attr("d", d => lineGen(d.values));
+
+  linesG.selectAll(".label")
+    .data(series)
+    .enter().append("text")
+      .attr("class", "label")
+      .attr("x", d => x(d.values[d.values.length-1].date) + 4)
+      .attr("y", d => y(d.values[d.values.length-1].value))
+      .text(d => d.game);
+}
+
+function addRankSymbols(svg, idPrefix, series, x, y, colorMap) {
+  const symbols = d3.select(`#plot-${idPrefix}`).append("g").attr("id", `symbols-${idPrefix}`);
+  const ticks = x.ticks(threeMonths);
+
+  series.forEach(s => {
+    const byTime = new Map(s.values.map(v => [ +v.date, v ]));
+    const pts = ticks.map(t => byTime.get(+t)).filter(v => v && v.rank != null);
+
+    const group = symbols.append("g").attr("data-game", s.game);
+    group.selectAll("circle")
+      .data(pts)
+      .enter().append("circle")
+        .attr("cx", d => x(d.date))
+        .attr("cy", d => y(d.value))
+        .attr("r", 4)
+        .attr("fill", colorMap(s.game))
+        .attr("stroke", "#333")
+        .attr("stroke-width", 1);
+
+    group.selectAll("text")
+      .data(pts)
+      .enter().append("text")
+        .attr("x", d => x(d.date) + 6)
+        .attr("y", d => y(d.value) - 6)
+        .text(d => d.rank);
+  });
+}
+
+function addLegend(svg, idPrefix) {
+  const legend = svg.append("g").attr("id", `legend-${idPrefix}`);
+  const x0 = outerW - margin.right + 10;
+  const y0 = margin.top + 8;
+  const g = legend.append("g").attr("class","legend-item");
+  g.append("circle").attr("cx", x0).attr("cy", y0).attr("r", 6).attr("fill", "#999").attr("stroke","#333");
+  g.append("text").attr("x", x0 + 10).attr("y", y0 + 4).text("Ranking marker (every 3 months)");
+}
+
+d3.csv("boardgame_ratings.csv").then(raw => {
+  raw.forEach(d => {
+    d.date = parseDate(d.date);
+    Object.keys(d).forEach(k => {
+      if (k !== "date" && d[k] !== "") d[k] = +d[k];
+    });
+  });
+
+  // Q3.1
+  (function(){
+    const svg = d3.select("#svg-a");
+    const series = buildSeriesWide(raw, GAMES8);
+
+    const x = d3.scaleTime().domain([START, END]).range([0, w]);
+    const ymax = d3.max(series, s => d3.max(s.values, v => v.value));
+    const y = d3.scaleLinear().domain([0, ymax]).nice().range([h, 0]);
+
+    const { linesG } = makeAxes(svg, "a", x, y, "Month", "Num of Ratings", "Number of Ratings 2016–2020");
+    const colorMap = d3.scaleOrdinal().domain(GAMES8).range(colors10);
+    drawLines(linesG, series, x, y, colorMap);
+  })();
+
+  // Q3.2 (with ranking symbols + legend)
+  (function(){
+    const svg = d3.select("#svg-b");
+    const series = buildSeriesWide(raw, GAMES8);
+
+    const x = d3.scaleTime().domain([START, END]).range([0, w]);
+    const ymax = d3.max(series, s => d3.max(s.values, v => v.value));
+    const y = d3.scaleLinear().domain([0, ymax]).nice().range([h, 0]);
+
+    const { linesG } = makeAxes(svg, "b", x, y, "Month", "Num of Ratings", "Number of Ratings 2016–2020 with Rankings");
+    const colorMap = d3.scaleOrdinal().domain(GAMES8).range(colors10);
+    drawLines(linesG, series, x, y, colorMap);
+
+    const seriesSub = buildSeriesWide(raw, GAMES4);
+    addRankSymbols(svg, "b", seriesSub, x, y, d3.scaleOrdinal().domain(GAMES8).range(colors10));
+    addLegend(svg, "b");
+  })();
+
+  // Q3.3-1 (sqrt y)
+  (function(){
+    const svg = d3.select("#svg-c-1");
+    const series = buildSeriesWide(raw, GAMES8);
+
+    const x = d3.scaleTime().domain([START, END]).range([0, w]);
+    const ymax = d3.max(series, s => d3.max(s.values, v => v.value));
+    const y = d3.scaleSqrt().domain([0, ymax]).nice().range([h, 0]);
+
+    const { linesG } = makeAxes(svg, "c-1", x, y, "Month", "Num of Ratings", "Number of Ratings 2016–2020 (Square root Scale)");
+    const colorMap = d3.scaleOrdinal().domain(GAMES8).range(colors10);
+    drawLines(linesG, series, x, y, colorMap);
+
+    const seriesSub = buildSeriesWide(raw, GAMES4);
+    addRankSymbols(svg, "c-1", seriesSub, x, y, d3.scaleOrdinal().domain(GAMES8).range(colors10));
+    addLegend(svg, "c-1");
+  })();
+
+  // Q3.3-2 (log y)
+  (function(){
+    const svg = d3.select("#svg-c-2");
+    let series = buildSeriesWide(raw, GAMES8);
+
+    const x = d3.scaleTime().domain([START, END]).range([0, w]);
+    const ymax = d3.max(series, s => d3.max(s.values, v => v.value));
+    const y = d3.scaleLog().domain([1, Math.max(1, ymax)]).nice().range([h, 0]);
+
+    series = series.map(s => ({
+      game: s.game,
+      values: s.values.map(v => ({ date: v.date, value: Math.max(1, v.value), rank: v.rank }))
+    }));
+
+    const { linesG } = makeAxes(svg, "c-2", x, y, "Month", "Num of Ratings", "Number of Ratings 2016–2020 (Log Scale)");
+    const colorMap = d3.scaleOrdinal().domain(GAMES8).range(colors10);
+    drawLines(linesG, series, x, y, colorMap);
+
+    let seriesSub = buildSeriesWide(raw, GAMES4);
+    seriesSub = seriesSub.map(s => ({
+      game: s.game,
+      values: s.values.map(v => ({ date: v.date, value: Math.max(1, v.value), rank: v.rank }))
+    }));
+    addRankSymbols(svg, "c-2", seriesSub, x, y, d3.scaleOrdinal().domain(GAMES8).range(colors10));
+    addLegend(svg, "c-2");
+  })();
+
+}).catch(err => {
+  console.error("Failed to load boardgame_ratings.csv:", err);
+});
+</script>
+</body>
+</html>
+
+
